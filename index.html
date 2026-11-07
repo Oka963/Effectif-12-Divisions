@@ -169,6 +169,7 @@
   .brig.chimie{color:var(--chem);border-color:rgba(123,224,138,.4);background:rgba(123,224,138,.08);}
   .brig.formateur{color:#c79bff;border-color:rgba(199,155,255,.4);background:rgba(199,155,255,.08);}
   .brig.tresorerie{color:var(--gold);border-color:rgba(255,211,106,.4);background:rgba(255,211,106,.08);}
+  .brig.alchimiste{color:#ff7eb6;border-color:rgba(255,126,182,.4);background:rgba(255,126,182,.08);}
   .brig.autre{color:var(--dim);border-color:var(--line);}
   .role-badges{display:flex;flex-wrap:wrap;gap:6px;}
   .role-chip{font-size:12px;font-weight:700;padding:4px 11px;border-radius:30px;letter-spacing:.6px;color:var(--gold);border:1px solid rgba(255,211,106,.4);background:rgba(255,211,106,.08);}
@@ -221,6 +222,7 @@
     <div class="stat" style="--c:var(--chem)"><div class="num" id="sChem">–</div><div class="label">Pôle Chimie</div></div>
     <div class="stat" style="--c:#c79bff"><div class="num" id="sForm">–</div><div class="label">Pôle Formateur</div></div>
     <div class="stat" style="--c:var(--gold)"><div class="num" id="sTres">–</div><div class="label">Pôle Trésorerie</div></div>
+    <div class="stat" style="--c:#ff7eb6"><div class="num" id="sAlch">–</div><div class="label">Pôle Alchimiste</div></div>
     <div class="stat" style="--c:var(--red)"><div class="num" id="sAbs">–</div><div class="label">Absents</div></div>
   </section>
 
@@ -256,8 +258,8 @@ const SHEET_ID = _m ? _m[1] : "REMPLACE_PAR_TON_ID_DE_SHEET";
 const GID = _g ? _g[1] : "0";
 
 // Colonnes attendues : Grade | Nom | Brigade | Zanpakuto | Absent | Sanction
-const HEADER_MATCH = { grade:"grade", nom:"nom", brigade:"brigade", corps:"corps", pole:"pole", lame:"zanpakuto", absent:"absent", sanction:"sanction", kenpachi:"kenpachi", tresorerie:"tresorerie", formateur:"formateur", alchimie:"alchimie", fonction:"fonction", spirituel:"spirituel", technique:"technique", chimie:"chimie" };
-const ROLES = [["kenpachi","Kenpachi"],["alchimie","Alchimie"]];
+const HEADER_MATCH = { grade:"grade", nom:"nom", brigade:"brigade", corps:"corps", pole:"pole", lame:"zanpakuto", absent:"absent", sanction:"sanction", kenpachi:"kenpachi", tresorerie:"tresorerie", formateur:"formateur", alchimie:"alchimi", fonction:"fonction", spirituel:"spirituel", technique:"technique", chimie:"chimie" };
+const ROLES = [["kenpachi","Kenpachi"]];
 
 const GRADES = [
   ["capitaine","Capitaine","#ffd36a"],["fukutaicho","Fukutaicho","#ffb35c"],
@@ -268,9 +270,9 @@ const GRADES = [
 ];
 // Deux catégories distinctes : le CORPS (Spirituel / Technique) et le PÔLE (Chimie, …)
 const CORPS = ["Spirituel","Technique"];
-const POLES = ["Chimie","Formateur","Trésorerie"];
+const POLES = ["Chimie","Formateur","Trésorerie","Alchimiste"];
 // Colonnes cochables du Sheet (clé d'en-tête, libellé) lues pour Corps/Pôle
-const GROUP_COLS = [["spirituel","Spirituel"],["technique","Technique"],["chimie","Chimie"],["formateur","Formateur"],["tresorerie","Trésorerie"]];
+const GROUP_COLS = [["spirituel","Spirituel"],["technique","Technique"],["chimie","Chimie"],["formateur","Formateur"],["tresorerie","Trésorerie"],["alchimie","Alchimiste"]];
 
 const DEMO = [
   ["Capitaine","Kuchiki Ren","Spirituel","Senbonzakura","",""],
@@ -299,7 +301,7 @@ function gradeInfo(g){
   const i = GRADES.findIndex(([key]) => key === k);
   return i === -1 ? { idx:999, label:g || "Non classé", color:"#8b8b99" } : { idx:i, label:GRADES[i][1], color:GRADES[i][2] };
 }
-function brigClass(b){ const k = normKey(b); return ["spirituel","technique","chimie","formateur","tresorerie"].includes(k) ? k : "autre"; }
+function brigClass(b){ const k = normKey(b); return ["spirituel","technique","chimie","formateur","tresorerie","alchimiste"].includes(k) ? k : "autre"; }
 function isTrue(v){ if(!v) return false; return ["TRUE","VRAI","OUI","X","1","✓"].includes(v.toString().trim().toUpperCase()); }
 function escapeHtml(s){ return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 function initials(n){ const p = n.trim().split(/\s+/); return ((p[0]||"")[0]||"").toUpperCase() + ((p[1]||"")[0]||"").toUpperCase(); }
@@ -325,8 +327,9 @@ function detectColumns(rows){
   for(let r = 0; r < Math.min(rows.length, 15); r++){
     const cleaned = rows[r].map(cleanHeader);
     if(cleaned.includes("grade") && cleaned.includes("nom")){
-      const col = {};
-      Object.entries(HEADER_MATCH).forEach(([key, m]) => { col[key] = cleaned.findIndex(c => c === m || c.includes(m)); });
+      const col = {}, used = new Set();
+      Object.entries(HEADER_MATCH).forEach(([key, m]) => { col[key] = cleaned.findIndex(c => c === m); if(col[key] >= 0) used.add(col[key]); });
+      Object.entries(HEADER_MATCH).forEach(([key, m]) => { if(col[key] < 0){ col[key] = cleaned.findIndex((c,i) => !used.has(i) && c.includes(m)); if(col[key] >= 0) used.add(col[key]); } });
       return { headerRow:r, col };
     }
   }
@@ -338,7 +341,7 @@ function detectColumns(rows){
 // "Brigade" / les cases Spirituel-Technique-Chimie et on trie chaque valeur dans la bonne catégorie.
 function readGroups(get, COL){
   const corps = new Set(), poles = new Set();
-  const canon = (x, list) => list.find(b => normKey(b) === normKey(x));
+  const canon = (x, list) => list.find(b => normKey(b) === (normKey(x) === "alchimie" ? "alchimiste" : normKey(x)));
   const split = s => s.split(/[,;\/+&]|\bet\b/i).map(x => x.trim()).filter(Boolean);
   const sort = (x, fallback) => {
     const c = canon(x, CORPS), p = canon(x, POLES);
@@ -397,6 +400,7 @@ async function loadData(manual){
     document.getElementById("sChem").textContent = cntP("chimie");
     document.getElementById("sForm").textContent = cntP("formateur");
     document.getElementById("sTres").textContent = cntP("tresorerie");
+    document.getElementById("sAlch").textContent = cntP("alchimiste");
     document.getElementById("sAbs").textContent = allMembers.filter(m => m.absent).length;
     document.getElementById("syncTime").textContent = new Date().toLocaleTimeString('fr-FR');
     restartCountdown();
